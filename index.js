@@ -156,7 +156,7 @@ client.on('interactionCreate', async interaction => {
             let svgString = svgResponse.data;
             
             // Convert Light Mode SVG to GitHub Dark Mode
-            svgString = svgString.replace(/#ebedf0/gi, '#161b22'); // Empty
+            svgString = svgString.replace(/#eeeeee|#ebedf0/gi, '#161b22'); // Empty
             svgString = svgString.replace(/#c6e48b|#9be9a8/gi, '#0e4429'); // L1
             svgString = svgString.replace(/#7bc96f|#40c463/gi, '#006d32'); // L2
             svgString = svgString.replace(/#239a3b|#30a14e/gi, '#26a641'); // L3
@@ -259,7 +259,7 @@ client.on('interactionCreate', async interaction => {
             let svgString = svgResponse.data;
             
             // Convert Light Mode SVG to GitHub Dark Mode
-            svgString = svgString.replace(/#ebedf0/gi, '#161b22'); // Empty
+            svgString = svgString.replace(/#eeeeee|#ebedf0/gi, '#161b22'); // Empty
             svgString = svgString.replace(/#c6e48b|#9be9a8/gi, '#0e4429'); // L1
             svgString = svgString.replace(/#7bc96f|#40c463/gi, '#006d32'); // L2
             svgString = svgString.replace(/#239a3b|#30a14e/gi, '#26a641'); // L3
