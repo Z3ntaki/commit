@@ -40,6 +40,10 @@ const commands = [
     {
         name: 'leaderboard',
         description: 'View the server leaderboard for tracked GitHub commits.',
+    },
+    {
+        name: 'verify',
+        description: 'Verify your GitHub account after adding the code to your bio.',
     }
 ];
 
@@ -155,8 +159,45 @@ client.on('interactionCreate', async interaction => {
 
     if (interaction.commandName === 'track') {
         const username = interaction.options.getString('username');
-        db.addTrackedUser(interaction.guildId, interaction.channelId, interaction.user.id, username);
-        await interaction.reply(`✅ Now tracking GitHub user **${username}** in this channel! New commits will be posted here.`);
+        const code = `commit-bot-${Math.floor(1000 + Math.random() * 9000)}`;
+        
+        db.setPendingVerification(interaction.user.id, username, code, interaction.guildId, interaction.channelId);
+        
+        await interaction.reply({
+            content: `🔒 **Verification Required for \`${username}\`**\nTo prove you own this GitHub account, please add the following code to your GitHub profile bio:\n\n\`${code}\`\n\nOnce you have saved your bio, run the \`/verify\` command here!`,
+            ephemeral: true 
+        });
+    }
+
+    if (interaction.commandName === 'verify') {
+        await interaction.deferReply({ ephemeral: true });
+        const pending = db.getPendingVerification(interaction.user.id);
+        
+        if (!pending) {
+            return interaction.editReply('❌ You don\'t have a pending verification. Run `/track <username>` first.');
+        }
+
+        try {
+            const response = await axios.get(`https://api.github.com/users/${pending.github_username}`);
+            const bio = response.data.bio || '';
+
+            if (bio.includes(pending.verification_code)) {
+                db.addTrackedUser(pending.guild_id, pending.channel_id, pending.discord_id, pending.github_username);
+                db.deletePendingVerification(pending.discord_id);
+                
+                const channel = await client.channels.fetch(pending.channel_id);
+                if (channel) {
+                    channel.send(`✅ Now tracking GitHub user **${pending.github_username}**! Commits will be posted here.`);
+                }
+
+                return interaction.editReply('✅ **Verification successful!** You can now remove the code from your GitHub bio.');
+            } else {
+                return interaction.editReply(`❌ The verification code \`${pending.verification_code}\` was not found in the bio for **${pending.github_username}**.\n\nPlease make sure you saved it and try again.`);
+            }
+        } catch (err) {
+            console.error(err);
+            return interaction.editReply(`❌ Error checking GitHub API. Make sure the username **${pending.github_username}** is correct.`);
+        }
     }
 
     if (interaction.commandName === 'untrack') {

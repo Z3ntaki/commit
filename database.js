@@ -17,7 +17,34 @@ db.exec(`
     )
 `);
 
+db.exec(`
+    CREATE TABLE IF NOT EXISTS pending_verifications (
+        discord_id TEXT PRIMARY KEY,
+        github_username TEXT NOT NULL,
+        verification_code TEXT NOT NULL,
+        guild_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL
+    )
+`);
+
 module.exports = {
+    setPendingVerification: (discordId, githubUsername, code, guildId, channelId) => {
+        const stmt = db.prepare(`
+            INSERT INTO pending_verifications (discord_id, github_username, verification_code, guild_id, channel_id) 
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(discord_id) 
+            DO UPDATE SET github_username = excluded.github_username, verification_code = excluded.verification_code, guild_id = excluded.guild_id, channel_id = excluded.channel_id
+        `);
+        return stmt.run(discordId, githubUsername, code, guildId, channelId);
+    },
+    getPendingVerification: (discordId) => {
+        const stmt = db.prepare('SELECT * FROM pending_verifications WHERE discord_id = ?');
+        return stmt.get(discordId);
+    },
+    deletePendingVerification: (discordId) => {
+        const stmt = db.prepare('DELETE FROM pending_verifications WHERE discord_id = ?');
+        return stmt.run(discordId);
+    },
     addTrackedUser: (guildId, channelId, discordId, githubUsername) => {
         const stmt = db.prepare(`
             INSERT INTO tracked_users (guild_id, channel_id, discord_id, github_username) 
