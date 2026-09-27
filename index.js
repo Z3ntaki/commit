@@ -153,10 +153,20 @@ client.on('interactionCreate', async interaction => {
         try {
             // Fetch SVG Graph
             const svgResponse = await axios.get(`https://ghchart.rshah.org/${username}`);
-            const svgBuffer = Buffer.from(svgResponse.data);
+            let svgString = svgResponse.data;
             
-            // Convert to PNG 
-            const pngBuffer = await sharp(svgBuffer).png().toBuffer();
+            // Convert Light Mode SVG to GitHub Dark Mode
+            svgString = svgString.replace(/#ebedf0/gi, '#161b22'); // Empty
+            svgString = svgString.replace(/#c6e48b|#9be9a8/gi, '#0e4429'); // L1
+            svgString = svgString.replace(/#7bc96f|#40c463/gi, '#006d32'); // L2
+            svgString = svgString.replace(/#239a3b|#30a14e/gi, '#26a641'); // L3
+            svgString = svgString.replace(/#196127|#216e39/gi, '#39d353'); // L4
+            svgString = svgString.replace(/#767676/gi, '#c9d1d9'); // Text
+            
+            const svgBuffer = Buffer.from(svgString);
+            
+            // Convert to PNG with dark background
+            const pngBuffer = await sharp(svgBuffer).flatten({ background: '#0d1117' }).png().toBuffer();
             const attachment = new AttachmentBuilder(pngBuffer, { name: 'chart.png' });
             
             const embed = new EmbedBuilder()
@@ -246,10 +256,20 @@ client.on('interactionCreate', async interaction => {
         try {
             // Fetch SVG Graph
             const svgResponse = await axios.get(`https://ghchart.rshah.org/${verified.github_username}`);
-            const svgBuffer = Buffer.from(svgResponse.data);
+            let svgString = svgResponse.data;
             
-            // Convert to PNG 
-            const pngBuffer = await sharp(svgBuffer).png().toBuffer();
+            // Convert Light Mode SVG to GitHub Dark Mode
+            svgString = svgString.replace(/#ebedf0/gi, '#161b22'); // Empty
+            svgString = svgString.replace(/#c6e48b|#9be9a8/gi, '#0e4429'); // L1
+            svgString = svgString.replace(/#7bc96f|#40c463/gi, '#006d32'); // L2
+            svgString = svgString.replace(/#239a3b|#30a14e/gi, '#26a641'); // L3
+            svgString = svgString.replace(/#196127|#216e39/gi, '#39d353'); // L4
+            svgString = svgString.replace(/#767676/gi, '#c9d1d9'); // Text
+            
+            const svgBuffer = Buffer.from(svgString);
+            
+            // Convert to PNG with dark background
+            const pngBuffer = await sharp(svgBuffer).flatten({ background: '#0d1117' }).png().toBuffer();
             const attachment = new AttachmentBuilder(pngBuffer, { name: 'chart.png' });
             
             // Fetch basic profile info
