@@ -278,16 +278,18 @@ client.on('interactionCreate', async interaction => {
             const top10 = leaderboardData.slice(0, 10);
 
             // 5. Build the beautiful embed
+            const guildName = interaction.guild ? interaction.guild.name : 'this server';
             const embed = new EmbedBuilder()
                 .setColor('#238636')
                 .setTitle(`🏆 Server GitHub Leaderboard`)
-                .setDescription(`Top open-source contributors in **${interaction.guild.name}** over the last year!\n\n` + 
+                .setDescription(`Top open-source contributors in **${guildName}** over the last year!\n\n` + 
                     top10.map((user, index) => {
                         let medal = '🏅';
                         if (index === 0) medal = '🥇';
                         if (index === 1) medal = '🥈';
                         if (index === 2) medal = '🥉';
-                        return `${medal} **${index + 1}.** <@${user.discord_id}> (${user.github_username})\n└ 💻 **${user.commits.toLocaleString()}** contributions`;
+                        const commitText = user.commits != null ? user.commits.toLocaleString() : '0';
+                        return `${medal} **${index + 1}.** <@${user.discord_id}> (${user.github_username})\n└ 💻 **${commitText}** contributions`;
                     }).join('\n\n')
                 )
                 .setFooter({ text: 'Run /verify to join the leaderboard!' });
@@ -295,7 +297,7 @@ client.on('interactionCreate', async interaction => {
             await interaction.editReply({ embeds: [embed] });
         } catch (error) {
             console.error('Leaderboard error:', error);
-            await interaction.editReply('❌ An unexpected error occurred while generating the leaderboard.');
+            await interaction.editReply(`❌ An unexpected error occurred: ${error.message || error}`);
         }
     }
 
