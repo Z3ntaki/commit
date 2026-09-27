@@ -171,23 +171,17 @@ client.on('interactionCreate', async interaction => {
             
             const embed = new EmbedBuilder()
                 .setColor('#238636')
-                .setTitle(`Now tracking: ${username}`)
-                .setDescription(`✅ Successfully started tracking **${username}** in this channel!\n\nHere is their recent activity:`)
+                .setTitle(`GitHub Activity: ${username}`)
                 .setImage('attachment://chart.png');
                 
             await interaction.editReply({ embeds: [embed], files: [attachment] });
         } catch (err) {
             console.error(err);
-            // Fallback if the graph API fails
-            await interaction.editReply(`✅ Now tracking GitHub user **${username}** in this channel! New commits will be posted here.`);
+            await interaction.editReply(`❌ Could not generate graph for **${username}**. Make sure the username is correct or try again later.`);
         }
     }
 
-    if (interaction.commandName === 'untrack') {
-        const username = interaction.options.getString('username');
-        await db.removeTrackedUser(interaction.guildId, username);
-        await interaction.reply(`🛑 Stopped tracking GitHub user **${username}**.`);
-    }
+
 
     if (interaction.commandName === 'leaderboard') {
         await interaction.deferReply();
