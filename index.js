@@ -167,9 +167,32 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (interaction.commandName === 'track') {
+        await interaction.deferReply();
         const username = interaction.options.getString('username');
-        await db.addTrackedUser(interaction.guildId, interaction.channelId, username);
-        await interaction.reply(`✅ Now tracking GitHub user **${username}** in this channel! New commits will be posted here.`);
+        
+        try {
+            await db.addTrackedUser(interaction.guildId, interaction.channelId, username);
+            
+            // Fetch SVG Graph
+            const svgResponse = await axios.get(`https://ghchart.rshah.org/${username}`);
+            const svgBuffer = Buffer.from(svgResponse.data);
+            
+            // Convert to PNG 
+            const pngBuffer = await sharp(svgBuffer).png().toBuffer();
+            const attachment = new AttachmentBuilder(pngBuffer, { name: 'chart.png' });
+            
+            const embed = new EmbedBuilder()
+                .setColor('#238636')
+                .setTitle(`Now tracking: ${username}`)
+                .setDescription(`✅ Successfully started tracking **${username}** in this channel!\n\nHere is their recent activity:`)
+                .setImage('attachment://chart.png');
+                
+            await interaction.editReply({ embeds: [embed], files: [attachment] });
+        } catch (err) {
+            console.error(err);
+            // Fallback if the graph API fails
+            await interaction.editReply(`✅ Now tracking GitHub user **${username}** in this channel! New commits will be posted here.`);
+        }
     }
 
     if (interaction.commandName === 'untrack') {
