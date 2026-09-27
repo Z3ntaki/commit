@@ -76,94 +76,18 @@ const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     }
 })();
 
-// --- GitHub Polling Logic ---
-async function checkGitHubCommits() {
-    const users = await db.getAllTrackedUsers();
-    
-    for (const user of users) {
-        try {
-            const headers = {};
-            if (process.env.GITHUB_TOKEN) {
-                headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`;
-            }
-
-            const response = await axios.get(`https://api.github.com/users/${user.github_username}/events/public`, {
-                headers,
-                timeout: 5000
-            });
-
-            const events = response.data;
-            const pushEvents = events.filter(e => e.type === 'PushEvent');
-
-            if (pushEvents.length === 0) continue;
-
-            const latestEvent = pushEvents[0];
-
-            if (latestEvent.id !== user.last_event_id) {
-                let newCommitsAdded = 0;
-
-                const newPushEvents = [];
-                for (const event of pushEvents) {
-                    if (event.id === user.last_event_id) break;
-                    newPushEvents.push(event);
-                }
-
-                if (!user.last_event_id) {
-                    await db.updateUserCommitData(user.id, latestEvent.id, 0);
-                    continue;
-                }
-
-                try {
-                    const channel = await client.channels.fetch(user.channel_id);
-                    if (channel) {
-                        for (const event of newPushEvents.reverse()) {
-                            const commits = event.payload.commits;
-                            newCommitsAdded += commits.length;
-
-                            for (const commit of commits) {
-                                const embed = new EmbedBuilder()
-                                    .setColor('#0099ff')
-                                    .setAuthor({ name: user.github_username, iconURL: event.actor.avatar_url, url: `https://github.com/${user.github_username}` })
-                                    .setTitle(`New Commit in ${event.repo.name}`)
-                                    .setURL(`https://github.com/${event.repo.name}/commit/${commit.sha}`)
-                                    .setDescription(commit.message.substring(0, 2048))
-                                    .setTimestamp(new Date(event.created_at));
-
-                                await channel.send({ embeds: [embed] });
-                            }
-                        }
-                    }
-                } catch (err) {
-                    console.error(`Failed to send message to channel ${user.channel_id}:`, err);
-                }
-
-                await db.updateUserCommitData(user.id, latestEvent.id, newCommitsAdded);
-            }
-        } catch (error) {
-            if (error.response && error.response.status === 404) {
-                console.log(`GitHub user ${user.github_username} not found.`);
-            } else if (error.response && error.response.status === 403) {
-                console.log(`GitHub API rate limit exceeded. Please add a GITHUB_TOKEN to .env`);
-            } else {
-                console.error(`Error fetching for ${user.github_username}:`, error.message);
-            }
-        }
-    }
-}
+// --- GitHub Polling Logic Removed per user request ---
 
 client.on('ready', () => {
     console.log(`✅ Logged in as ${client.user.tag}!`);
-    console.log(`Bot is ready to start tracking commits!`);
-
-    // Poll GitHub every 3 minutes (180,000 ms)
-    setInterval(checkGitHubCommits, 180000);
+    console.log(`Bot is ready!`);
 });
 
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
     if (interaction.commandName === 'ping') {
-        await interaction.reply('Pong! 🏓 The commit tracker bot is online.');
+        await interaction.reply('Pong! 🏓 The bot is online.');
     }
 
     if (interaction.commandName === 'track') {
@@ -171,8 +95,6 @@ client.on('interactionCreate', async interaction => {
         const username = interaction.options.getString('username');
         
         try {
-            await db.addTrackedUser(interaction.guildId, interaction.channelId, username);
-            
             // Fetch SVG Graph
             const svgResponse = await axios.get(`https://ghchart.rshah.org/${username}`);
             const svgBuffer = Buffer.from(svgResponse.data);
