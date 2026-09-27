@@ -12,6 +12,50 @@ app.get('/', (req, res) => {
     res.send('Commit Bot is running!');
 });
 
+app.get('/auth/github/callback', async (req, res) => {
+    const code = req.query.code;
+    const discordId = req.query.state; // We passed their Discord ID in the state parameter
+
+    if (!code || !discordId) {
+        return res.status(400).send('Invalid request: Missing code or state');
+    }
+
+    try {
+        // Exchange code for access token
+        const tokenResponse = await axios.post('https://github.com/login/oauth/access_token', {
+            client_id: process.env.GITHUB_CLIENT_ID,
+            client_secret: process.env.GITHUB_CLIENT_SECRET,
+            code: code
+        }, {
+            headers: { Accept: 'application/json' }
+        });
+
+        const accessToken = tokenResponse.data.access_token;
+        if (!accessToken) {
+            return res.status(400).send('Authentication failed: Could not get access token');
+        }
+
+        // Fetch user profile from GitHub
+        const userResponse = await axios.get('https://api.github.com/user', {
+            headers: { Authorization: `Bearer ${accessToken}` }
+        });
+
+        const githubUsername = userResponse.data.login;
+
+        // Save directly to the Database!
+        await db.addVerifiedUser(discordId, githubUsername);
+
+        res.send(`<div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
+            <h1 style="color: #238636;">Verification Successful! 🎉</h1>
+            <p>You have successfully linked your Discord account to GitHub user <b>${githubUsername}</b>.</p>
+            <p>You can close this tab and return to Discord to use <code>/me</code>!</p>
+        </div>`);
+    } catch (err) {
+        console.error('OAuth Error:', err.response?.data || err.message);
+        res.status(500).send('An error occurred during verification.');
+    }
+});
+
 app.listen(port, () => {
     console.log(`Web server listening on port ${port}`);
 });
@@ -163,39 +207,21 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (interaction.commandName === 'verify') {
-        const usernameInput = interaction.options.getString('username');
+        const clientId = process.env.GITHUB_CLIENT_ID;
         
-        if (usernameInput) {
-            const code = `commit-bot-${Math.floor(1000 + Math.random() * 9000)}`;
-            await db.setPendingVerification(interaction.user.id, usernameInput, code);
-            return interaction.reply({
-                content: `🔒 **Verification Required for \`${usernameInput}\`**\nTo prove you own this GitHub account, please add the following code to your GitHub profile bio:\n\n\`${code}\`\n\nOnce you have saved your bio, run the \`/verify\` command (without arguments) here!`,
-                ephemeral: true 
-            });
+        if (!clientId) {
+            return interaction.reply({ content: '❌ The bot owner has not set up the GITHUB_CLIENT_ID yet!', ephemeral: true });
         }
 
-        await interaction.deferReply({ ephemeral: true });
-        const pending = await db.getPendingVerification(interaction.user.id);
+        const hostUrl = process.env.HOST_URL || `http://localhost:${port}`;
+        const redirectUri = encodeURIComponent(`${hostUrl}/auth/github/callback`);
         
-        if (!pending) {
-            return interaction.editReply('❌ You don\'t have a pending verification. Run `/verify <username>` first.');
-        }
-
-        try {
-            const response = await axios.get(`https://api.github.com/users/${pending.github_username}`);
-            const bio = response.data.bio || '';
-
-            if (bio.includes(pending.verification_code)) {
-                await db.addVerifiedUser(pending.discord_id, pending.github_username);
-                await db.deletePendingVerification(pending.discord_id);
-                return interaction.editReply('✅ **Verification successful!** Your Discord account is now permanently linked. Try running `/me`!');
-            } else {
-                return interaction.editReply(`❌ The verification code \`${pending.verification_code}\` was not found in the bio for **${pending.github_username}**.\n\nPlease make sure you saved it and try again.`);
-            }
-        } catch (err) {
-            console.error(err);
-            return interaction.editReply(`❌ Error checking GitHub API. Make sure the username **${pending.github_username}** is correct.`);
-        }
+        const oauthUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&state=${interaction.user.id}`;
+        
+        await interaction.reply({
+            content: `🔒 **Verify your GitHub Account**\n\nClick the link below to securely log in with GitHub. This will permanently link your Discord account to your GitHub profile!\n\n**[👉 Click here to Link your GitHub](${oauthUrl})**`,
+            ephemeral: true 
+        });
     }
 
     if (interaction.commandName === 'me') {
