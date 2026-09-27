@@ -198,27 +198,78 @@ client.on('interactionCreate', async interaction => {
 
     if (interaction.commandName === 'leaderboard') {
         await interaction.deferReply();
-        const users = await db.getTrackedUsersByGuild(interaction.guildId);
         
-        if (users.length === 0) {
-            return interaction.editReply('No users are currently being tracked in this server. Use `/track <username>` to start!');
+        // 1. Get all verified users globally
+        const allVerified = await db.getAllVerifiedUsers();
+        
+        if (allVerified.length === 0) {
+            return interaction.editReply('❌ Nobody has verified their GitHub account yet! Run `/verify` to link your account.');
         }
 
-        const verifiedUsers = await db.getAllVerifiedUsers();
-        const verifiedMap = {};
-        for (const v of verifiedUsers) {
-            verifiedMap[v.github_username] = v.discord_id;
+        // 2. Filter to only users who are in this specific Discord server
+        const guildMembers = await interaction.guild.members.fetch();
+        const serverUsers = allVerified.filter(u => guildMembers.has(u.discord_id));
+
+        if (serverUsers.length === 0) {
+            return interaction.editReply('❌ No verified GitHub users are in this server yet.');
         }
 
+        if (!process.env.GITHUB_TOKEN) {
+            return interaction.editReply('❌ The bot owner needs to set GITHUB_TOKEN to use the true leaderboard.');
+        }
+
+        const graphqlQuery = `
+          query($login: String!) {
+            user(login: $login) {
+              contributionsCollection {
+                contributionCalendar {
+                  totalContributions
+                }
+              }
+            }
+          }
+        `;
+
+        const leaderboardData = [];
+
+        // 3. Fetch exact total commits (contributions) for each user in parallel!
+        await Promise.all(serverUsers.map(async (user) => {
+            try {
+                const res = await axios.post(
+                    'https://api.github.com/graphql',
+                    { query: graphqlQuery, variables: { login: user.github_username } },
+                    { headers: { Authorization: `bearer ${process.env.GITHUB_TOKEN}` } }
+                );
+                const commits = res.data.data.user.contributionsCollection.contributionCalendar.totalContributions;
+                leaderboardData.push({
+                    discord_id: user.discord_id,
+                    github_username: user.github_username,
+                    commits: commits
+                });
+            } catch (err) {
+                console.error(`Failed to fetch GraphQL for ${user.github_username}`);
+            }
+        }));
+
+        // 4. Sort by commits descending and grab the top 10
+        leaderboardData.sort((a, b) => b.commits - a.commits);
+        const top10 = leaderboardData.slice(0, 10);
+
+        // 5. Build the beautiful embed
         const embed = new EmbedBuilder()
-            .setTitle(`🏆 Server Commit Leaderboard`)
-            .setColor('#FFD700')
-            .setDescription(
-                users.map((u, i) => {
-                    const discordPing = verifiedMap[u.github_username] ? `(<@${verifiedMap[u.github_username]}>)` : '';
-                    return `**${i + 1}.** [${u.github_username}](https://github.com/${u.github_username}) - ${u.commit_count} commits ${discordPing}`;
-                }).join('\n')
-            );
+            .setColor('#238636')
+            .setTitle(`🏆 Server GitHub Leaderboard`)
+            .setDescription(`Top open-source contributors in **${interaction.guild.name}** over the last year!\n\n` + 
+                top10.map((user, index) => {
+                    let medal = '🏅';
+                    if (index === 0) medal = '🥇';
+                    if (index === 1) medal = '🥈';
+                    if (index === 2) medal = '🥉';
+                    
+                    return `${medal} **${index + 1}.** <@${user.discord_id}> (${user.github_username})\n└ 💻 **${user.commits.toLocaleString()}** contributions`;
+                }).join('\n\n')
+            )
+            .setFooter({ text: 'Run /verify to join the leaderboard!' });
 
         await interaction.editReply({ embeds: [embed] });
     }
