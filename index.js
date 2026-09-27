@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, REST, Routes, EmbedBuilder, AttachmentBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, EmbedBuilder, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const axios = require('axios');
 const sharp = require('sharp');
 const express = require('express');
@@ -213,13 +213,24 @@ client.on('interactionCreate', async interaction => {
             return interaction.reply({ content: '❌ The bot owner has not set up the GITHUB_CLIENT_ID yet!', ephemeral: true });
         }
 
-        const hostUrl = process.env.HOST_URL || `http://localhost:${port}`;
+        let hostUrl = process.env.HOST_URL || `http://localhost:${port}`;
+        if (hostUrl.endsWith('/')) hostUrl = hostUrl.slice(0, -1); // Remove trailing slash
+        
         const redirectUri = encodeURIComponent(`${hostUrl}/auth/github/callback`);
         
         const oauthUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&state=${interaction.user.id}`;
         
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setLabel('Link GitHub Account')
+                    .setURL(oauthUrl)
+                    .setStyle(ButtonStyle.Link)
+            );
+        
         await interaction.reply({
-            content: `🔒 **Verify your GitHub Account**\n\nClick the link below to securely log in with GitHub. This will permanently link your Discord account to your GitHub profile!\n\n**[👉 Click here to Link your GitHub](${oauthUrl})**`,
+            content: `🔒 **Verify your GitHub Account**\n\nClick the button below to securely log in with GitHub. This will permanently link your Discord account to your GitHub profile!`,
+            components: [row],
             ephemeral: true 
         });
     }
