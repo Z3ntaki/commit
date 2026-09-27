@@ -61,6 +61,8 @@ async function generateLeaderboardImage(guildName, topUsers) {
                 
                 <text x="140" y="32" font-family="Arial, sans-serif" font-size="20" font-weight="bold" fill="#c9d1d9">${u.github_username}</text>
                 
+                ${u.streak > 0 ? `<rect x="350" y="12" width="110" height="26" fill="#da3633" rx="13" /><text x="405" y="30" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#ffffff" text-anchor="middle">STREAK: ${u.streak}</text>` : ''}
+                
                 <text x="690" y="32" font-family="Arial, sans-serif" font-size="20" font-weight="bold" fill="#39d353" text-anchor="end">${u.commits.toLocaleString()} commits</text>
             </g>
         `;

@@ -236,9 +236,16 @@ client.on('interactionCreate', async interaction => {
                 chunk.forEach((user, index) => {
                     queryFields += `
                       user_${index}: user(login: "${user.github_username}") {
+                        avatarUrl
                         contributionsCollection {
                           contributionCalendar {
                             totalContributions
+                            weeks {
+                              contributionDays {
+                                contributionCount
+                                date
+                              }
+                            }
                           }
                         }
                       }
@@ -258,10 +265,29 @@ client.on('interactionCreate', async interaction => {
                     chunk.forEach((user, index) => {
                         const userData = data[`user_${index}`];
                         if (userData && userData.contributionsCollection) {
+                            const calendar = userData.contributionsCollection.contributionCalendar;
+                            
+                            // Calculate streak
+                            let days = [];
+                            calendar.weeks.forEach(w => {
+                                w.contributionDays.forEach(d => days.push(d));
+                            });
+                            
+                            let currentStreak = 0;
+                            for (let j = days.length - 1; j >= 0; j--) {
+                                const count = days[j].contributionCount;
+                                // Ignore today if 0 since day isn't over
+                                if (j === days.length - 1 && count === 0) continue;
+                                if (count > 0) currentStreak++;
+                                else break; // Streak broken
+                            }
+
                             leaderboardData.push({
                                 discord_id: user.discord_id,
                                 github_username: user.github_username,
-                                commits: userData.contributionsCollection.contributionCalendar.totalContributions
+                                avatar_url: userData.avatarUrl,
+                                commits: calendar.totalContributions,
+                                streak: currentStreak
                             });
                         }
                     });
