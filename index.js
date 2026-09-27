@@ -253,7 +253,9 @@ client.on('interactionCreate', async interaction => {
             const attachment = new AttachmentBuilder(pngBuffer, { name: 'chart.png' });
             
             // Fetch basic profile info
-            const response = await axios.get(`https://api.github.com/users/${verified.github_username}`);
+            const headers = {};
+            if (process.env.GITHUB_TOKEN) headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`;
+            const response = await axios.get(`https://api.github.com/users/${verified.github_username}`, { headers });
             const profile = response.data;
             
             const embed = new EmbedBuilder()
