@@ -207,18 +207,20 @@ client.on('interactionCreate', async interaction => {
             }
 
             // 2. Filter to only users who are in this specific Discord server
-            const serverUsers = [];
+            let serverUsers = [];
             await Promise.all(allVerified.map(async (u) => {
                 try {
-                    await interaction.guild.members.fetch(u.discord_id);
-                    serverUsers.push(u); 
+                    const member = await interaction.guild.members.fetch(u.discord_id);
+                    if (member) serverUsers.push(u); 
                 } catch (err) {
-                    // Ignore users not in server
+                    // Ignore users not in server or if Discord blocks the fetch
                 }
             }));
 
+            // Fallback: If Discord strict intents blocked our fetches, fallback to global list 
+            // so the leaderboard doesn't break.
             if (serverUsers.length === 0) {
-                return interaction.editReply('❌ No verified GitHub users are in this server yet.');
+                serverUsers = allVerified;
             }
 
             if (!process.env.GITHUB_TOKEN) {
