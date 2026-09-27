@@ -169,9 +169,22 @@ client.on('interactionCreate', async interaction => {
             const pngBuffer = await sharp(svgBuffer).flatten({ background: '#0d1117' }).png().toBuffer();
             const attachment = new AttachmentBuilder(pngBuffer, { name: 'chart.png' });
             
+            // Fetch basic profile info for extra details
+            const headers = {};
+            if (process.env.GITHUB_TOKEN) headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`;
+            const profileResponse = await axios.get(`https://api.github.com/users/${username}`, { headers });
+            const profile = profileResponse.data;
+            
             const embed = new EmbedBuilder()
                 .setColor('#238636')
-                .setTitle(`GitHub Activity: ${username}`)
+                .setAuthor({ name: `${profile.login}'s GitHub Activity`, iconURL: profile.avatar_url, url: profile.html_url })
+                .setThumbnail(profile.avatar_url)
+                .setDescription(profile.bio ? `*${profile.bio}*` : '')
+                .addFields(
+                    { name: '📦 Repos', value: `${profile.public_repos}`, inline: true },
+                    { name: '👥 Followers', value: `${profile.followers}`, inline: true },
+                    { name: '🏢 Company', value: profile.company || 'None', inline: true }
+                )
                 .setImage('attachment://chart.png');
                 
             await interaction.editReply({ embeds: [embed], files: [attachment] });
@@ -274,11 +287,16 @@ client.on('interactionCreate', async interaction => {
             
             const embed = new EmbedBuilder()
                 .setColor('#238636')
-                .setAuthor({ name: verified.github_username, iconURL: profile.avatar_url, url: `https://github.com/${verified.github_username}` })
-                .setTitle(`${profile.name || verified.github_username}'s GitHub Profile`)
-                .setDescription(`**Public Repos:** ${profile.public_repos}\n**Followers:** ${profile.followers}\n**Bio:** ${profile.bio || 'None'}`)
+                .setAuthor({ name: `${profile.login}'s Verified Profile`, iconURL: profile.avatar_url, url: profile.html_url })
+                .setThumbnail(profile.avatar_url)
+                .setDescription(profile.bio ? `*${profile.bio}*` : '')
+                .addFields(
+                    { name: '📦 Public Repos', value: `${profile.public_repos}`, inline: true },
+                    { name: '👥 Followers', value: `${profile.followers}`, inline: true },
+                    { name: '⭐ Following', value: `${profile.following}`, inline: true }
+                )
                 .setImage('attachment://chart.png')
-                .setFooter({ text: 'Contribution Graph (Last Year)' });
+                .setFooter({ text: 'Linked via Commit Tracker' });
                 
             await interaction.editReply({ embeds: [embed], files: [attachment] });
         } catch (err) {
