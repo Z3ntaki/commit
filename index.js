@@ -20,7 +20,7 @@ const commands = [
             {
                 name: 'username',
                 description: 'The GitHub username to track',
-                type: 3, // ApplicationCommandOptionType.String
+                type: 3,
                 required: true,
             }
         ]
@@ -65,7 +65,7 @@ const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
 // --- GitHub Polling Logic ---
 async function checkGitHubCommits() {
-    const users = db.getAllTrackedUsers();
+    const users = await db.getAllTrackedUsers();
     
     for (const user of users) {
         try {
@@ -86,24 +86,20 @@ async function checkGitHubCommits() {
 
             const latestEvent = pushEvents[0];
 
-            // Check if this is a new event
             if (latestEvent.id !== user.last_event_id) {
                 let newCommitsAdded = 0;
 
-                // Find all new events since last_event_id
                 const newPushEvents = [];
                 for (const event of pushEvents) {
                     if (event.id === user.last_event_id) break;
                     newPushEvents.push(event);
                 }
 
-                // First time tracking: just save the latest event ID to avoid spamming old commits.
                 if (!user.last_event_id) {
-                    db.updateUserCommitData(user.id, latestEvent.id, 0);
+                    await db.updateUserCommitData(user.id, latestEvent.id, 0);
                     continue;
                 }
 
-                // Post embeds for new commits
                 try {
                     const channel = await client.channels.fetch(user.channel_id);
                     if (channel) {
@@ -117,7 +113,7 @@ async function checkGitHubCommits() {
                                     .setAuthor({ name: user.github_username, iconURL: event.actor.avatar_url, url: `https://github.com/${user.github_username}` })
                                     .setTitle(`New Commit in ${event.repo.name}`)
                                     .setURL(`https://github.com/${event.repo.name}/commit/${commit.sha}`)
-                                    .setDescription(commit.message.substring(0, 2048)) // Discord limits desc to 4096, keeping it safe
+                                    .setDescription(commit.message.substring(0, 2048))
                                     .setTimestamp(new Date(event.created_at));
 
                                 await channel.send({ embeds: [embed] });
@@ -128,7 +124,7 @@ async function checkGitHubCommits() {
                     console.error(`Failed to send message to channel ${user.channel_id}:`, err);
                 }
 
-                db.updateUserCommitData(user.id, latestEvent.id, newCommitsAdded);
+                await db.updateUserCommitData(user.id, latestEvent.id, newCommitsAdded);
             }
         } catch (error) {
             if (error.response && error.response.status === 404) {
@@ -161,7 +157,7 @@ client.on('interactionCreate', async interaction => {
         const username = interaction.options.getString('username');
         const code = `commit-bot-${Math.floor(1000 + Math.random() * 9000)}`;
         
-        db.setPendingVerification(interaction.user.id, username, code, interaction.guildId, interaction.channelId);
+        await db.setPendingVerification(interaction.user.id, username, code, interaction.guildId, interaction.channelId);
         
         await interaction.reply({
             content: `🔒 **Verification Required for \`${username}\`**\nTo prove you own this GitHub account, please add the following code to your GitHub profile bio:\n\n\`${code}\`\n\nOnce you have saved your bio, run the \`/verify\` command here!`,
@@ -171,7 +167,7 @@ client.on('interactionCreate', async interaction => {
 
     if (interaction.commandName === 'verify') {
         await interaction.deferReply({ ephemeral: true });
-        const pending = db.getPendingVerification(interaction.user.id);
+        const pending = await db.getPendingVerification(interaction.user.id);
         
         if (!pending) {
             return interaction.editReply('❌ You don\'t have a pending verification. Run `/track <username>` first.');
@@ -182,8 +178,8 @@ client.on('interactionCreate', async interaction => {
             const bio = response.data.bio || '';
 
             if (bio.includes(pending.verification_code)) {
-                db.addTrackedUser(pending.guild_id, pending.channel_id, pending.discord_id, pending.github_username);
-                db.deletePendingVerification(pending.discord_id);
+                await db.addTrackedUser(pending.guild_id, pending.channel_id, pending.discord_id, pending.github_username);
+                await db.deletePendingVerification(pending.discord_id);
                 
                 const channel = await client.channels.fetch(pending.channel_id);
                 if (channel) {
@@ -202,12 +198,12 @@ client.on('interactionCreate', async interaction => {
 
     if (interaction.commandName === 'untrack') {
         const username = interaction.options.getString('username');
-        db.removeTrackedUser(interaction.guildId, username);
+        await db.removeTrackedUser(interaction.guildId, username);
         await interaction.reply(`🛑 Stopped tracking GitHub user **${username}**.`);
     }
 
     if (interaction.commandName === 'leaderboard') {
-        const users = db.getTrackedUsersByGuild(interaction.guildId);
+        const users = await db.getTrackedUsersByGuild(interaction.guildId);
         
         if (users.length === 0) {
             return interaction.reply('No users are currently being tracked in this server. Use `/track <username>` to start!');

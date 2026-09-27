@@ -1,73 +1,97 @@
-const Database = require('better-sqlite3');
-const path = require('path');
+require('dotenv').config();
+const { createClient } = require('@supabase/supabase-js');
 
-const db = new Database(path.join(__dirname, 'commit.db'));
-
-// Create tables
-db.exec(`
-    CREATE TABLE IF NOT EXISTS tracked_users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id TEXT NOT NULL,
-        channel_id TEXT NOT NULL,
-        discord_id TEXT NOT NULL,
-        github_username TEXT NOT NULL,
-        last_event_id TEXT,
-        commit_count INTEGER DEFAULT 0,
-        UNIQUE(guild_id, github_username)
-    )
-`);
-
-db.exec(`
-    CREATE TABLE IF NOT EXISTS pending_verifications (
-        discord_id TEXT PRIMARY KEY,
-        github_username TEXT NOT NULL,
-        verification_code TEXT NOT NULL,
-        guild_id TEXT NOT NULL,
-        channel_id TEXT NOT NULL
-    )
-`);
+const supabaseUrl = process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
+const supabaseKey = process.env.SUPABASE_KEY || 'placeholder_key';
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 module.exports = {
-    setPendingVerification: (discordId, githubUsername, code, guildId, channelId) => {
-        const stmt = db.prepare(`
-            INSERT INTO pending_verifications (discord_id, github_username, verification_code, guild_id, channel_id) 
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(discord_id) 
-            DO UPDATE SET github_username = excluded.github_username, verification_code = excluded.verification_code, guild_id = excluded.guild_id, channel_id = excluded.channel_id
-        `);
-        return stmt.run(discordId, githubUsername, code, guildId, channelId);
+    setPendingVerification: async (discordId, githubUsername, code, guildId, channelId) => {
+        const { error } = await supabase
+            .from('pending_verifications')
+            .upsert({ 
+                discord_id: discordId, 
+                github_username: githubUsername, 
+                verification_code: code, 
+                guild_id: guildId, 
+                channel_id: channelId 
+            });
+        if (error) console.error('Error setting pending verification:', error);
     },
-    getPendingVerification: (discordId) => {
-        const stmt = db.prepare('SELECT * FROM pending_verifications WHERE discord_id = ?');
-        return stmt.get(discordId);
+    getPendingVerification: async (discordId) => {
+        const { data, error } = await supabase
+            .from('pending_verifications')
+            .select('*')
+            .eq('discord_id', discordId)
+            .single();
+        if (error && error.code !== 'PGRST116') console.error('Error getting pending verification:', error);
+        return data;
     },
-    deletePendingVerification: (discordId) => {
-        const stmt = db.prepare('DELETE FROM pending_verifications WHERE discord_id = ?');
-        return stmt.run(discordId);
+    deletePendingVerification: async (discordId) => {
+        const { error } = await supabase
+            .from('pending_verifications')
+            .delete()
+            .eq('discord_id', discordId);
+        if (error) console.error('Error deleting pending verification:', error);
     },
-    addTrackedUser: (guildId, channelId, discordId, githubUsername) => {
-        const stmt = db.prepare(`
-            INSERT INTO tracked_users (guild_id, channel_id, discord_id, github_username) 
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(guild_id, github_username) 
-            DO UPDATE SET channel_id = excluded.channel_id, discord_id = excluded.discord_id
-        `);
-        return stmt.run(guildId, channelId, discordId, githubUsername);
+    addTrackedUser: async (guildId, channelId, discordId, githubUsername) => {
+        // Upsert relying on unique constraint (guild_id, github_username) in Supabase
+        const { error } = await supabase
+            .from('tracked_users')
+            .upsert({ 
+                guild_id: guildId, 
+                channel_id: channelId, 
+                discord_id: discordId, 
+                github_username: githubUsername
+            }, { onConflict: 'guild_id,github_username' });
+        
+        if (error) console.error('Error adding tracked user:', error);
     },
-    removeTrackedUser: (guildId, githubUsername) => {
-        const stmt = db.prepare('DELETE FROM tracked_users WHERE guild_id = ? AND github_username = ?');
-        return stmt.run(guildId, githubUsername);
+    removeTrackedUser: async (guildId, githubUsername) => {
+        const { error } = await supabase
+            .from('tracked_users')
+            .delete()
+            .eq('guild_id', guildId)
+            .eq('github_username', githubUsername);
+        if (error) console.error('Error removing tracked user:', error);
     },
-    getTrackedUsersByGuild: (guildId) => {
-        const stmt = db.prepare('SELECT * FROM tracked_users WHERE guild_id = ? ORDER BY commit_count DESC');
-        return stmt.all(guildId);
+    getTrackedUsersByGuild: async (guildId) => {
+        const { data, error } = await supabase
+            .from('tracked_users')
+            .select('*')
+            .eq('guild_id', guildId)
+            .order('commit_count', { ascending: false });
+        if (error) console.error('Error getting tracked users by guild:', error);
+        return data || [];
     },
-    getAllTrackedUsers: () => {
-        const stmt = db.prepare('SELECT * FROM tracked_users');
-        return stmt.all();
+    getAllTrackedUsers: async () => {
+        const { data, error } = await supabase
+            .from('tracked_users')
+            .select('*');
+        if (error) console.error('Error getting all tracked users:', error);
+        return data || [];
     },
-    updateUserCommitData: (id, lastEventId, commitsAdded) => {
-        const stmt = db.prepare('UPDATE tracked_users SET last_event_id = ?, commit_count = commit_count + ? WHERE id = ?');
-        return stmt.run(lastEventId, commitsAdded, id);
+    updateUserCommitData: async (id, lastEventId, commitsAdded) => {
+        // Fetch current commit count before updating (to simulate SQL commit_count = commit_count + X)
+        const { data: user, error: fetchError } = await supabase
+            .from('tracked_users')
+            .select('commit_count')
+            .eq('id', id)
+            .single();
+            
+        if (fetchError) {
+             console.error('Error fetching user for commit update:', fetchError);
+             return;
+        }
+
+        const { error } = await supabase
+            .from('tracked_users')
+            .update({ 
+                last_event_id: lastEventId, 
+                commit_count: (user.commit_count || 0) + commitsAdded 
+            })
+            .eq('id', id);
+            
+        if (error) console.error('Error updating user commit data:', error);
     }
 };
