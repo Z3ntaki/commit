@@ -2,7 +2,19 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, REST, Routes, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const axios = require('axios');
 const sharp = require('sharp');
+const express = require('express');
 const db = require('./database');
+
+const app = express();
+const port = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+    res.send('Commit Bot is running!');
+});
+
+app.listen(port, () => {
+    console.log(`Web server listening on port ${port}`);
+});
 
 const client = new Client({
     intents: [GatewayIntentBits.Guilds]
