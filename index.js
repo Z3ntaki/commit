@@ -198,100 +198,103 @@ client.on('interactionCreate', async interaction => {
 
     if (interaction.commandName === 'leaderboard') {
         await interaction.deferReply();
-        
-        // 1. Get all verified users globally
-        const allVerified = await db.getAllVerifiedUsers();
-        
-        if (allVerified.length === 0) {
-            return interaction.editReply('❌ Nobody has verified their GitHub account yet! Run `/verify` to link your account.');
-        }
-
-        // 2. Filter to only users who are in this specific Discord server
-        // We fetch each user individually to avoid needing the privileged GUILD_MEMBERS intent!
-        const serverUsers = [];
-        await Promise.all(allVerified.map(async (u) => {
-            try {
-                await interaction.guild.members.fetch(u.discord_id);
-                serverUsers.push(u); // If fetch succeeds, they are in the server
-            } catch (err) {
-                // If it fails, they are not in this server, ignore them
-            }
-        }));
-
-        if (serverUsers.length === 0) {
-            return interaction.editReply('❌ No verified GitHub users are in this server yet.');
-        }
-
-        if (!process.env.GITHUB_TOKEN) {
-            return interaction.editReply('❌ The bot owner needs to set GITHUB_TOKEN to use the true leaderboard.');
-        }
-
-        const leaderboardData = [];
-
-        // 3. Batch GraphQL queries (up to 20 users per request) for lightning-fast speeds
-        const CHUNK_SIZE = 20;
-        for (let i = 0; i < serverUsers.length; i += CHUNK_SIZE) {
-            const chunk = serverUsers.slice(i, i + CHUNK_SIZE);
+        try {
+            // 1. Get all verified users globally
+            const allVerified = await db.getAllVerifiedUsers();
             
-            let queryFields = '';
-            chunk.forEach((user, index) => {
-                queryFields += `
-                  user_${index}: user(login: "${user.github_username}") {
-                    contributionsCollection {
-                      contributionCalendar {
-                        totalContributions
-                      }
-                    }
-                  }
-                `;
-            });
-
-            try {
-                const res = await axios.post(
-                    'https://api.github.com/graphql',
-                    { query: `query { ${queryFields} }` },
-                    { headers: { Authorization: `bearer ${process.env.GITHUB_TOKEN}` } }
-                );
-
-                const data = res.data.data;
-                if (!data) continue;
-
-                chunk.forEach((user, index) => {
-                    const userData = data[`user_${index}`];
-                    if (userData) {
-                        leaderboardData.push({
-                            discord_id: user.discord_id,
-                            github_username: user.github_username,
-                            commits: userData.contributionsCollection.contributionCalendar.totalContributions
-                        });
-                    }
-                });
-            } catch (err) {
-                console.error('GraphQL Batch Error:', err.message);
+            if (allVerified.length === 0) {
+                return interaction.editReply('❌ Nobody has verified their GitHub account yet! Run `/verify` to link your account.');
             }
+
+            // 2. Filter to only users who are in this specific Discord server
+            const serverUsers = [];
+            await Promise.all(allVerified.map(async (u) => {
+                try {
+                    await interaction.guild.members.fetch(u.discord_id);
+                    serverUsers.push(u); 
+                } catch (err) {
+                    // Ignore users not in server
+                }
+            }));
+
+            if (serverUsers.length === 0) {
+                return interaction.editReply('❌ No verified GitHub users are in this server yet.');
+            }
+
+            if (!process.env.GITHUB_TOKEN) {
+                return interaction.editReply('❌ The bot owner needs to set GITHUB_TOKEN in the environment variables (using a GitHub Personal Access Token) to use the true leaderboard.');
+            }
+
+            const leaderboardData = [];
+            const CHUNK_SIZE = 20;
+            for (let i = 0; i < serverUsers.length; i += CHUNK_SIZE) {
+                const chunk = serverUsers.slice(i, i + CHUNK_SIZE);
+                let queryFields = '';
+                chunk.forEach((user, index) => {
+                    queryFields += `
+                      user_${index}: user(login: "${user.github_username}") {
+                        contributionsCollection {
+                          contributionCalendar {
+                            totalContributions
+                          }
+                        }
+                      }
+                    `;
+                });
+
+                try {
+                    const res = await axios.post(
+                        'https://api.github.com/graphql',
+                        { query: `query { ${queryFields} }` },
+                        { headers: { Authorization: `bearer ${process.env.GITHUB_TOKEN}` } }
+                    );
+
+                    const data = res.data.data;
+                    if (!data) continue;
+
+                    chunk.forEach((user, index) => {
+                        const userData = data[`user_${index}`];
+                        if (userData && userData.contributionsCollection) {
+                            leaderboardData.push({
+                                discord_id: user.discord_id,
+                                github_username: user.github_username,
+                                commits: userData.contributionsCollection.contributionCalendar.totalContributions
+                            });
+                        }
+                    });
+                } catch (err) {
+                    console.error('GraphQL Batch Error:', err.message);
+                }
+            }
+
+            if (leaderboardData.length === 0) {
+                return interaction.editReply('❌ Failed to fetch leaderboard data. Your GITHUB_TOKEN might be invalid or expired.');
+            }
+
+            // 4. Sort by commits descending and grab the top 10
+            leaderboardData.sort((a, b) => b.commits - a.commits);
+            const top10 = leaderboardData.slice(0, 10);
+
+            // 5. Build the beautiful embed
+            const embed = new EmbedBuilder()
+                .setColor('#238636')
+                .setTitle(`🏆 Server GitHub Leaderboard`)
+                .setDescription(`Top open-source contributors in **${interaction.guild.name}** over the last year!\n\n` + 
+                    top10.map((user, index) => {
+                        let medal = '🏅';
+                        if (index === 0) medal = '🥇';
+                        if (index === 1) medal = '🥈';
+                        if (index === 2) medal = '🥉';
+                        return `${medal} **${index + 1}.** <@${user.discord_id}> (${user.github_username})\n└ 💻 **${user.commits.toLocaleString()}** contributions`;
+                    }).join('\n\n')
+                )
+                .setFooter({ text: 'Run /verify to join the leaderboard!' });
+
+            await interaction.editReply({ embeds: [embed] });
+        } catch (error) {
+            console.error('Leaderboard error:', error);
+            await interaction.editReply('❌ An unexpected error occurred while generating the leaderboard.');
         }
-
-        // 4. Sort by commits descending and grab the top 10
-        leaderboardData.sort((a, b) => b.commits - a.commits);
-        const top10 = leaderboardData.slice(0, 10);
-
-        // 5. Build the beautiful embed
-        const embed = new EmbedBuilder()
-            .setColor('#238636')
-            .setTitle(`🏆 Server GitHub Leaderboard`)
-            .setDescription(`Top open-source contributors in **${interaction.guild.name}** over the last year!\n\n` + 
-                top10.map((user, index) => {
-                    let medal = '🏅';
-                    if (index === 0) medal = '🥇';
-                    if (index === 1) medal = '🥈';
-                    if (index === 2) medal = '🥉';
-                    
-                    return `${medal} **${index + 1}.** <@${user.discord_id}> (${user.github_username})\n└ 💻 **${user.commits.toLocaleString()}** contributions`;
-                }).join('\n\n')
-            )
-            .setFooter({ text: 'Run /verify to join the leaderboard!' });
-
-        await interaction.editReply({ embeds: [embed] });
     }
 
     if (interaction.commandName === 'verify') {
