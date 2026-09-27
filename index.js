@@ -218,38 +218,50 @@ client.on('interactionCreate', async interaction => {
             return interaction.editReply('❌ The bot owner needs to set GITHUB_TOKEN to use the true leaderboard.');
         }
 
-        const graphqlQuery = `
-          query($login: String!) {
-            user(login: $login) {
-              contributionsCollection {
-                contributionCalendar {
-                  totalContributions
-                }
-              }
-            }
-          }
-        `;
-
         const leaderboardData = [];
 
-        // 3. Fetch exact total commits (contributions) for each user in parallel!
-        await Promise.all(serverUsers.map(async (user) => {
+        // 3. Batch GraphQL queries (up to 20 users per request) for lightning-fast speeds
+        const CHUNK_SIZE = 20;
+        for (let i = 0; i < serverUsers.length; i += CHUNK_SIZE) {
+            const chunk = serverUsers.slice(i, i + CHUNK_SIZE);
+            
+            let queryFields = '';
+            chunk.forEach((user, index) => {
+                queryFields += `
+                  user_${index}: user(login: "${user.github_username}") {
+                    contributionsCollection {
+                      contributionCalendar {
+                        totalContributions
+                      }
+                    }
+                  }
+                `;
+            });
+
             try {
                 const res = await axios.post(
                     'https://api.github.com/graphql',
-                    { query: graphqlQuery, variables: { login: user.github_username } },
+                    { query: `query { ${queryFields} }` },
                     { headers: { Authorization: `bearer ${process.env.GITHUB_TOKEN}` } }
                 );
-                const commits = res.data.data.user.contributionsCollection.contributionCalendar.totalContributions;
-                leaderboardData.push({
-                    discord_id: user.discord_id,
-                    github_username: user.github_username,
-                    commits: commits
+
+                const data = res.data.data;
+                if (!data) continue;
+
+                chunk.forEach((user, index) => {
+                    const userData = data[`user_${index}`];
+                    if (userData) {
+                        leaderboardData.push({
+                            discord_id: user.discord_id,
+                            github_username: user.github_username,
+                            commits: userData.contributionsCollection.contributionCalendar.totalContributions
+                        });
+                    }
                 });
             } catch (err) {
-                console.error(`Failed to fetch GraphQL for ${user.github_username}`);
+                console.error('GraphQL Batch Error:', err.message);
             }
-        }));
+        }
 
         // 4. Sort by commits descending and grab the top 10
         leaderboardData.sort((a, b) => b.commits - a.commits);
