@@ -6,15 +6,14 @@ const supabaseKey = process.env.SUPABASE_KEY || 'placeholder_key';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 module.exports = {
-    setPendingVerification: async (discordId, githubUsername, code, guildId, channelId) => {
+    // Pending verification codes
+    setPendingVerification: async (discordId, githubUsername, code) => {
         const { error } = await supabase
             .from('pending_verifications')
             .upsert({ 
                 discord_id: discordId, 
                 github_username: githubUsername, 
-                verification_code: code, 
-                guild_id: guildId, 
-                channel_id: channelId 
+                verification_code: code
             });
         if (error) console.error('Error setting pending verification:', error);
     },
@@ -34,14 +33,38 @@ module.exports = {
             .eq('discord_id', discordId);
         if (error) console.error('Error deleting pending verification:', error);
     },
-    addTrackedUser: async (guildId, channelId, discordId, githubUsername) => {
-        // Upsert relying on unique constraint (guild_id, github_username) in Supabase
+
+    // Global Verified Users
+    addVerifiedUser: async (discordId, githubUsername) => {
+        const { error } = await supabase
+            .from('verified_users')
+            .upsert({ discord_id: discordId, github_username: githubUsername });
+        if (error) console.error('Error adding verified user:', error);
+    },
+    getVerifiedUser: async (discordId) => {
+        const { data, error } = await supabase
+            .from('verified_users')
+            .select('*')
+            .eq('discord_id', discordId)
+            .single();
+        if (error && error.code !== 'PGRST116') console.error('Error getting verified user:', error);
+        return data;
+    },
+    getAllVerifiedUsers: async () => {
+        const { data, error } = await supabase
+            .from('verified_users')
+            .select('*');
+        if (error) console.error('Error getting all verified users:', error);
+        return data || [];
+    },
+
+    // Per-server Tracked Users
+    addTrackedUser: async (guildId, channelId, githubUsername) => {
         const { error } = await supabase
             .from('tracked_users')
             .upsert({ 
                 guild_id: guildId, 
                 channel_id: channelId, 
-                discord_id: discordId, 
                 github_username: githubUsername
             }, { onConflict: 'guild_id,github_username' });
         
@@ -72,17 +95,13 @@ module.exports = {
         return data || [];
     },
     updateUserCommitData: async (id, lastEventId, commitsAdded) => {
-        // Fetch current commit count before updating (to simulate SQL commit_count = commit_count + X)
         const { data: user, error: fetchError } = await supabase
             .from('tracked_users')
             .select('commit_count')
             .eq('id', id)
             .single();
             
-        if (fetchError) {
-             console.error('Error fetching user for commit update:', fetchError);
-             return;
-        }
+        if (fetchError) return;
 
         const { error } = await supabase
             .from('tracked_users')

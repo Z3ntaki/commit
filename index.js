@@ -1,6 +1,7 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, REST, Routes, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const axios = require('axios');
+const sharp = require('sharp');
 const db = require('./database');
 
 const client = new Client({
@@ -15,7 +16,7 @@ const commands = [
     },
     {
         name: 'track',
-        description: 'Track a GitHub user\'s commits in this channel.',
+        description: 'Track a GitHub user\'s commits in this channel (No verification needed).',
         options: [
             {
                 name: 'username',
@@ -43,7 +44,19 @@ const commands = [
     },
     {
         name: 'verify',
-        description: 'Verify your GitHub account after adding the code to your bio.',
+        description: 'Verify your GitHub account to link it to your Discord profile.',
+        options: [
+            {
+                name: 'username',
+                description: 'The GitHub username you want to verify (leave blank if checking pending verification)',
+                type: 3,
+                required: false,
+            }
+        ]
+    },
+    {
+        name: 'me',
+        description: 'View your verified GitHub profile card and contribution graph.',
     }
 ];
 
@@ -155,45 +168,8 @@ client.on('interactionCreate', async interaction => {
 
     if (interaction.commandName === 'track') {
         const username = interaction.options.getString('username');
-        const code = `commit-bot-${Math.floor(1000 + Math.random() * 9000)}`;
-        
-        await db.setPendingVerification(interaction.user.id, username, code, interaction.guildId, interaction.channelId);
-        
-        await interaction.reply({
-            content: `🔒 **Verification Required for \`${username}\`**\nTo prove you own this GitHub account, please add the following code to your GitHub profile bio:\n\n\`${code}\`\n\nOnce you have saved your bio, run the \`/verify\` command here!`,
-            ephemeral: true 
-        });
-    }
-
-    if (interaction.commandName === 'verify') {
-        await interaction.deferReply({ ephemeral: true });
-        const pending = await db.getPendingVerification(interaction.user.id);
-        
-        if (!pending) {
-            return interaction.editReply('❌ You don\'t have a pending verification. Run `/track <username>` first.');
-        }
-
-        try {
-            const response = await axios.get(`https://api.github.com/users/${pending.github_username}`);
-            const bio = response.data.bio || '';
-
-            if (bio.includes(pending.verification_code)) {
-                await db.addTrackedUser(pending.guild_id, pending.channel_id, pending.discord_id, pending.github_username);
-                await db.deletePendingVerification(pending.discord_id);
-                
-                const channel = await client.channels.fetch(pending.channel_id);
-                if (channel) {
-                    channel.send(`✅ Now tracking GitHub user **${pending.github_username}**! Commits will be posted here.`);
-                }
-
-                return interaction.editReply('✅ **Verification successful!** You can now remove the code from your GitHub bio.');
-            } else {
-                return interaction.editReply(`❌ The verification code \`${pending.verification_code}\` was not found in the bio for **${pending.github_username}**.\n\nPlease make sure you saved it and try again.`);
-            }
-        } catch (err) {
-            console.error(err);
-            return interaction.editReply(`❌ Error checking GitHub API. Make sure the username **${pending.github_username}** is correct.`);
-        }
+        await db.addTrackedUser(interaction.guildId, interaction.channelId, username);
+        await interaction.reply(`✅ Now tracking GitHub user **${username}** in this channel! New commits will be posted here.`);
     }
 
     if (interaction.commandName === 'untrack') {
@@ -203,20 +179,102 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (interaction.commandName === 'leaderboard') {
+        await interaction.deferReply();
         const users = await db.getTrackedUsersByGuild(interaction.guildId);
         
         if (users.length === 0) {
-            return interaction.reply('No users are currently being tracked in this server. Use `/track <username>` to start!');
+            return interaction.editReply('No users are currently being tracked in this server. Use `/track <username>` to start!');
+        }
+
+        const verifiedUsers = await db.getAllVerifiedUsers();
+        const verifiedMap = {};
+        for (const v of verifiedUsers) {
+            verifiedMap[v.github_username] = v.discord_id;
         }
 
         const embed = new EmbedBuilder()
             .setTitle(`🏆 Server Commit Leaderboard`)
             .setColor('#FFD700')
             .setDescription(
-                users.map((u, i) => `**${i + 1}.** [${u.github_username}](https://github.com/${u.github_username}) - ${u.commit_count} commits (<@${u.discord_id}>)`).join('\n')
+                users.map((u, i) => {
+                    const discordPing = verifiedMap[u.github_username] ? `(<@${verifiedMap[u.github_username]}>)` : '';
+                    return `**${i + 1}.** [${u.github_username}](https://github.com/${u.github_username}) - ${u.commit_count} commits ${discordPing}`;
+                }).join('\n')
             );
 
-        await interaction.reply({ embeds: [embed] });
+        await interaction.editReply({ embeds: [embed] });
+    }
+
+    if (interaction.commandName === 'verify') {
+        const usernameInput = interaction.options.getString('username');
+        
+        if (usernameInput) {
+            const code = `commit-bot-${Math.floor(1000 + Math.random() * 9000)}`;
+            await db.setPendingVerification(interaction.user.id, usernameInput, code);
+            return interaction.reply({
+                content: `🔒 **Verification Required for \`${usernameInput}\`**\nTo prove you own this GitHub account, please add the following code to your GitHub profile bio:\n\n\`${code}\`\n\nOnce you have saved your bio, run the \`/verify\` command (without arguments) here!`,
+                ephemeral: true 
+            });
+        }
+
+        await interaction.deferReply({ ephemeral: true });
+        const pending = await db.getPendingVerification(interaction.user.id);
+        
+        if (!pending) {
+            return interaction.editReply('❌ You don\'t have a pending verification. Run `/verify <username>` first.');
+        }
+
+        try {
+            const response = await axios.get(`https://api.github.com/users/${pending.github_username}`);
+            const bio = response.data.bio || '';
+
+            if (bio.includes(pending.verification_code)) {
+                await db.addVerifiedUser(pending.discord_id, pending.github_username);
+                await db.deletePendingVerification(pending.discord_id);
+                return interaction.editReply('✅ **Verification successful!** Your Discord account is now permanently linked. Try running `/me`!');
+            } else {
+                return interaction.editReply(`❌ The verification code \`${pending.verification_code}\` was not found in the bio for **${pending.github_username}**.\n\nPlease make sure you saved it and try again.`);
+            }
+        } catch (err) {
+            console.error(err);
+            return interaction.editReply(`❌ Error checking GitHub API. Make sure the username **${pending.github_username}** is correct.`);
+        }
+    }
+
+    if (interaction.commandName === 'me') {
+        await interaction.deferReply();
+        const verified = await db.getVerifiedUser(interaction.user.id);
+        
+        if (!verified) {
+            return interaction.editReply('❌ You have not verified your GitHub account! Run `/verify <username>` first.');
+        }
+
+        try {
+            // Fetch SVG Graph
+            const svgResponse = await axios.get(`https://ghchart.rshah.org/${verified.github_username}`);
+            const svgBuffer = Buffer.from(svgResponse.data);
+            
+            // Convert to PNG 
+            const pngBuffer = await sharp(svgBuffer).png().toBuffer();
+            const attachment = new AttachmentBuilder(pngBuffer, { name: 'chart.png' });
+            
+            // Fetch basic profile info
+            const response = await axios.get(`https://api.github.com/users/${verified.github_username}`);
+            const profile = response.data;
+            
+            const embed = new EmbedBuilder()
+                .setColor('#238636')
+                .setAuthor({ name: verified.github_username, iconURL: profile.avatar_url, url: `https://github.com/${verified.github_username}` })
+                .setTitle(`${profile.name || verified.github_username}'s GitHub Profile`)
+                .setDescription(`**Public Repos:** ${profile.public_repos}\n**Followers:** ${profile.followers}\n**Bio:** ${profile.bio || 'None'}`)
+                .setImage('attachment://chart.png')
+                .setFooter({ text: 'Contribution Graph (Last Year)' });
+                
+            await interaction.editReply({ embeds: [embed], files: [attachment] });
+        } catch (err) {
+            console.error(err);
+            return interaction.editReply('❌ Failed to fetch your GitHub data or generate the graph. The API might be down.');
+        }
     }
 });
 
