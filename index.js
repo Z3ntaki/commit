@@ -207,8 +207,16 @@ client.on('interactionCreate', async interaction => {
         }
 
         // 2. Filter to only users who are in this specific Discord server
-        const guildMembers = await interaction.guild.members.fetch();
-        const serverUsers = allVerified.filter(u => guildMembers.has(u.discord_id));
+        // We fetch each user individually to avoid needing the privileged GUILD_MEMBERS intent!
+        const serverUsers = [];
+        await Promise.all(allVerified.map(async (u) => {
+            try {
+                await interaction.guild.members.fetch(u.discord_id);
+                serverUsers.push(u); // If fetch succeeds, they are in the server
+            } catch (err) {
+                // If it fails, they are not in this server, ignore them
+            }
+        }));
 
         if (serverUsers.length === 0) {
             return interaction.editReply('❌ No verified GitHub users are in this server yet.');
