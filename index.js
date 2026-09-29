@@ -6,6 +6,9 @@ const express = require('express');
 const db = require('./database');
 const { generateLeaderboardImage } = require('./imageGenerator');
 
+const leaderboardCache = new Map();
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -50,6 +53,7 @@ app.get('/auth/github/callback', async (req, res) => {
         // If they verified inside a server, add them to that server's leaderboard automatically
         if (guildId && guildId !== 'undefined' && guildId !== 'null' && guildId !== 'dm') {
             await db.addTrackedUser(guildId, null, githubUsername);
+            leaderboardCache.delete(guildId); // clear cache
         }
 
         res.send(`<div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
@@ -226,8 +230,22 @@ client.on('interactionCreate', async interaction => {
                 return interaction.editReply('❌ The bot owner needs to set GITHUB_TOKEN in the environment variables (using a GitHub Personal Access Token) to use the true leaderboard.');
             }
 
+            if (leaderboardCache.has(interaction.guildId)) {
+                const cached = leaderboardCache.get(interaction.guildId);
+                if (Date.now() - cached.timestamp < CACHE_TTL) {
+                    const attachment = new AttachmentBuilder(cached.imageBuffer, { name: 'leaderboard.png' });
+                    const embed = new EmbedBuilder()
+                        .setColor('#0d1117')
+                        .setImage('attachment://leaderboard.png')
+                        .setFooter({ text: 'Run /verify to join the leaderboard! (Cached)' });
+                    return interaction.editReply({ embeds: [embed], files: [attachment] });
+                }
+            }
+
             const leaderboardData = [];
             const CHUNK_SIZE = 20;
+            const fetchPromises = [];
+
             for (let i = 0; i < serverUsers.length; i += CHUNK_SIZE) {
                 const chunk = serverUsers.slice(i, i + CHUNK_SIZE);
                 let queryFields = '';
@@ -250,17 +268,21 @@ client.on('interactionCreate', async interaction => {
                     `;
                 });
 
-                try {
-                    const res = await axios.post(
-                        'https://api.github.com/graphql',
-                        { query: `query { ${queryFields} }` },
-                        { headers: { Authorization: `bearer ${process.env.GITHUB_TOKEN}` } }
-                    );
+                fetchPromises.push(axios.post(
+                    'https://api.github.com/graphql',
+                    { query: `query { ${queryFields} }` },
+                    { headers: { Authorization: `bearer ${process.env.GITHUB_TOKEN}` } }
+                ).then(res => ({ data: res.data.data, chunk })));
+            }
 
-                    const data = res.data.data;
+            try {
+                const results = await Promise.all(fetchPromises);
+                
+                for (const res of results) {
+                    const data = res.data;
                     if (!data) continue;
 
-                    chunk.forEach((user, index) => {
+                    res.chunk.forEach((user, index) => {
                         const userData = data[`user_${index}`];
                         if (userData && userData.contributionsCollection) {
                             const calendar = userData.contributionsCollection.contributionCalendar;
@@ -288,9 +310,9 @@ client.on('interactionCreate', async interaction => {
                             });
                         }
                     });
-                } catch (err) {
-                    console.error('GraphQL Batch Error:', err.message);
                 }
+            } catch (err) {
+                console.error('GraphQL Batch Error:', err.message);
             }
 
             if (leaderboardData.length === 0) {
@@ -304,6 +326,13 @@ client.on('interactionCreate', async interaction => {
             // 5. Build the beautiful image!
             const guildName = interaction.guild ? interaction.guild.name : 'this server';
             const imageBuffer = await generateLeaderboardImage(guildName, top10);
+            
+            // Save to cache
+            leaderboardCache.set(interaction.guildId, {
+                timestamp: Date.now(),
+                imageBuffer: imageBuffer
+            });
+
             const attachment = new AttachmentBuilder(imageBuffer, { name: 'leaderboard.png' });
             
             const embed = new EmbedBuilder()
@@ -324,6 +353,7 @@ client.on('interactionCreate', async interaction => {
         if (verified && interaction.guildId) {
             // Automatically add them to this server's leaderboard
             await db.addTrackedUser(interaction.guildId, interaction.channelId, verified.github_username);
+            leaderboardCache.delete(interaction.guildId); // clear cache
             return interaction.reply({ 
                 content: `✅ You are already verified globally as **${verified.github_username}**!\nI have automatically added you to this server's leaderboard.`, 
                 ephemeral: true 
