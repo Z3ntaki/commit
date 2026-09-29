@@ -95,7 +95,19 @@ const commands = [
     },
     {
         name: 'leaderboard',
-        description: 'View the server leaderboard for tracked GitHub commits.',
+        description: 'View the leaderboard for tracked GitHub commits.',
+        options: [
+            {
+                name: 'type',
+                description: 'Which leaderboard to view (server or global)',
+                type: 3,
+                required: false,
+                choices: [
+                    { name: 'Server', value: 'server' },
+                    { name: 'Global', value: 'global' }
+                ]
+            }
+        ]
     },
     {
         name: 'verify',
@@ -198,52 +210,21 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'leaderboard') {
         await interaction.deferReply();
         try {
-            if (!interaction.guildId) {
+            const type = interaction.options.getString('type') || 'server';
+            const isGlobal = type === 'global';
+
+            if (!isGlobal && !interaction.guildId) {
                 return interaction.editReply('❌ This command can only be used in a server.');
             }
 
-            // 1. Get tracked users for this specific server directly from the database
-            let trackedUsers = await db.getTrackedUsersByGuild(interaction.guildId);
-            const trackedUsernames = new Set(trackedUsers.map(u => u.github_username));
-            
-            // 2. Auto-sync: Check if there are globally verified users in this server who aren't tracked yet
-            const allVerified = await db.getAllVerifiedUsers();
-            const missingVerified = allVerified.filter(u => !trackedUsernames.has(u.github_username));
-            
-            if (missingVerified.length > 0) {
-                let addedNew = false;
-                await Promise.all(missingVerified.map(async (u) => {
-                    try {
-                        const member = await interaction.guild.members.fetch(u.discord_id);
-                        if (member) {
-                            await db.addTrackedUser(interaction.guildId, null, u.github_username);
-                            trackedUsers.push(u);
-                            addedNew = true;
-                        }
-                    } catch (err) {
-                        // User not in server or fetch blocked
-                    }
-                }));
-                if (addedNew) {
-                    leaderboardCache.delete(interaction.guildId); // force fresh image gen
-                }
-            }
-            
-            if (trackedUsers.length === 0) {
-                return interaction.editReply('❌ Nobody in this server is on the leaderboard yet! Run `/verify` to join.');
-            }
-
-            // 3. Map to the expected format
-            const serverUsers = trackedUsers.map(u => ({
-                github_username: u.github_username
-            }));
+            const cacheKey = isGlobal ? 'global_leaderboard' : interaction.guildId;
 
             if (!process.env.GITHUB_TOKEN) {
                 return interaction.editReply('❌ The bot owner needs to set GITHUB_TOKEN in the environment variables (using a GitHub Personal Access Token) to use the true leaderboard.');
             }
 
-            if (leaderboardCache.has(interaction.guildId)) {
-                const cached = leaderboardCache.get(interaction.guildId);
+            if (leaderboardCache.has(cacheKey)) {
+                const cached = leaderboardCache.get(cacheKey);
                 if (Date.now() - cached.timestamp < CACHE_TTL) {
                     const attachment = new AttachmentBuilder(cached.imageBuffer, { name: 'leaderboard.png' });
                     const embed = new EmbedBuilder()
@@ -252,6 +233,52 @@ client.on('interactionCreate', async interaction => {
                         .setFooter({ text: 'Run /verify to join the leaderboard! (Cached)' });
                     return interaction.editReply({ embeds: [embed], files: [attachment] });
                 }
+            }
+
+            let serverUsers = [];
+
+            if (isGlobal) {
+                const allVerified = await db.getAllVerifiedUsers();
+                if (allVerified.length === 0) {
+                    return interaction.editReply('❌ Nobody has verified their GitHub account yet!');
+                }
+                serverUsers = allVerified.map(u => ({ github_username: u.github_username }));
+            } else {
+                // 1. Get tracked users for this specific server directly from the database
+                let trackedUsers = await db.getTrackedUsersByGuild(interaction.guildId);
+                const trackedUsernames = new Set(trackedUsers.map(u => u.github_username));
+                
+                // 2. Auto-sync: Check if there are globally verified users in this server who aren't tracked yet
+                const allVerified = await db.getAllVerifiedUsers();
+                const missingVerified = allVerified.filter(u => !trackedUsernames.has(u.github_username));
+                
+                if (missingVerified.length > 0) {
+                    let addedNew = false;
+                    await Promise.all(missingVerified.map(async (u) => {
+                        try {
+                            const member = await interaction.guild.members.fetch(u.discord_id);
+                            if (member) {
+                                await db.addTrackedUser(interaction.guildId, null, u.github_username);
+                                trackedUsers.push(u);
+                                addedNew = true;
+                            }
+                        } catch (err) {
+                            // User not in server or fetch blocked
+                        }
+                    }));
+                    if (addedNew) {
+                        leaderboardCache.delete(interaction.guildId); // force fresh image gen
+                    }
+                }
+                
+                if (trackedUsers.length === 0) {
+                    return interaction.editReply('❌ Nobody in this server is on the leaderboard yet! Run `/verify` to join.');
+                }
+
+                // 3. Map to the expected format
+                serverUsers = trackedUsers.map(u => ({
+                    github_username: u.github_username
+                }));
             }
 
             const leaderboardData = [];
@@ -336,11 +363,11 @@ client.on('interactionCreate', async interaction => {
             const top10 = leaderboardData.slice(0, 10);
 
             // 5. Build the beautiful image!
-            const guildName = interaction.guild ? interaction.guild.name : 'this server';
+            const guildName = isGlobal ? 'GLOBAL' : (interaction.guild ? interaction.guild.name : 'this server');
             const imageBuffer = await generateLeaderboardImage(guildName, top10);
             
             // Save to cache
-            leaderboardCache.set(interaction.guildId, {
+            leaderboardCache.set(cacheKey, {
                 timestamp: Date.now(),
                 imageBuffer: imageBuffer
             });
