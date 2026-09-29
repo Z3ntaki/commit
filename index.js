@@ -157,7 +157,7 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply('Pong! 🏓 The bot is online.');
     }
 
-    if (interaction.commandName === 'graph') {
+    if (interaction.commandName === 'graph' || interaction.commandName === 'track') {
         await interaction.deferReply();
         const username = interaction.options.getString('username');
         
