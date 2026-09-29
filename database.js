@@ -51,11 +51,27 @@ module.exports = {
         return data;
     },
     getAllVerifiedUsers: async () => {
-        const { data, error } = await supabase
-            .from('verified_users')
-            .select('*');
-        if (error) console.error('Error getting all verified users:', error);
-        return data || [];
+        let allData = [];
+        let page = 0;
+        const pageSize = 1000;
+        
+        while (true) {
+            const { data, error } = await supabase
+                .from('verified_users')
+                .select('*')
+                .range(page * pageSize, (page + 1) * pageSize - 1);
+                
+            if (error) {
+                console.error('Error getting all verified users:', error);
+                break;
+            }
+            if (!data || data.length === 0) break;
+            
+            allData = allData.concat(data);
+            if (data.length < pageSize) break;
+            page++;
+        }
+        return allData;
     },
 
     // Per-server Tracked Users

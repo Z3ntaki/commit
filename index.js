@@ -82,12 +82,12 @@ const commands = [
         description: 'Replies with Pong and confirms the bot is online!',
     },
     {
-        name: 'track',
-        description: 'Track a GitHub user\'s commits in this channel (No verification needed).',
+        name: 'graph',
+        description: 'View a GitHub user\'s contribution graph.',
         options: [
             {
                 name: 'username',
-                description: 'The GitHub username to track',
+                description: 'The GitHub username to view',
                 type: 3,
                 required: true,
             }
@@ -157,7 +157,7 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply('Pong! 🏓 The bot is online.');
     }
 
-    if (interaction.commandName === 'track') {
+    if (interaction.commandName === 'graph') {
         await interaction.deferReply();
         const username = interaction.options.getString('username');
         
@@ -182,7 +182,7 @@ client.on('interactionCreate', async interaction => {
             
             // Fetch basic profile info for extra details
             const headers = {};
-            if (process.env.GITHUB_TOKEN) headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`;
+            if (process.env.GITHUB_TOKEN) headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
             const profileResponse = await axios.get(`https://api.github.com/users/${username}`, { headers });
             const profile = profileResponse.data;
             
@@ -283,6 +283,7 @@ client.on('interactionCreate', async interaction => {
 
             const leaderboardData = [];
             const CHUNK_SIZE = 20;
+            const MAX_CONCURRENT = 3;
             const fetchPromises = [];
 
             for (let i = 0; i < serverUsers.length; i += CHUNK_SIZE) {
@@ -307,7 +308,7 @@ client.on('interactionCreate', async interaction => {
                     `;
                 });
 
-                fetchPromises.push(axios.post(
+                fetchPromises.push(() => axios.post(
                     'https://api.github.com/graphql',
                     { query: `query { ${queryFields} }` },
                     { headers: { Authorization: `bearer ${process.env.GITHUB_TOKEN}` } }
@@ -315,7 +316,12 @@ client.on('interactionCreate', async interaction => {
             }
 
             try {
-                const results = await Promise.all(fetchPromises);
+                const results = [];
+                for (let i = 0; i < fetchPromises.length; i += MAX_CONCURRENT) {
+                    const batch = fetchPromises.slice(i, i + MAX_CONCURRENT).map(f => f());
+                    const batchResults = await Promise.all(batch);
+                    results.push(...batchResults);
+                }
                 
                 for (const res of results) {
                     const data = res.data;
@@ -458,7 +464,7 @@ client.on('interactionCreate', async interaction => {
             
             // Fetch basic profile info
             const headers = {};
-            if (process.env.GITHUB_TOKEN) headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`;
+            if (process.env.GITHUB_TOKEN) headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
             const response = await axios.get(`https://api.github.com/users/${verified.github_username}`, { headers });
             const profile = response.data;
             
