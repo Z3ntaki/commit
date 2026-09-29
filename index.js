@@ -94,18 +94,6 @@ const commands = [
         ]
     },
     {
-        name: 'untrack',
-        description: 'Stop tracking a GitHub user in this server.',
-        options: [
-            {
-                name: 'username',
-                description: 'The GitHub username to untrack',
-                type: 3, 
-                required: true,
-            }
-        ]
-    },
-    {
         name: 'leaderboard',
         description: 'View the server leaderboard for tracked GitHub commits.',
     },
@@ -215,13 +203,37 @@ client.on('interactionCreate', async interaction => {
             }
 
             // 1. Get tracked users for this specific server directly from the database
-            const trackedUsers = await db.getTrackedUsersByGuild(interaction.guildId);
+            let trackedUsers = await db.getTrackedUsersByGuild(interaction.guildId);
+            const trackedUsernames = new Set(trackedUsers.map(u => u.github_username));
+            
+            // 2. Auto-sync: Check if there are globally verified users in this server who aren't tracked yet
+            const allVerified = await db.getAllVerifiedUsers();
+            const missingVerified = allVerified.filter(u => !trackedUsernames.has(u.github_username));
+            
+            if (missingVerified.length > 0) {
+                let addedNew = false;
+                await Promise.all(missingVerified.map(async (u) => {
+                    try {
+                        const member = await interaction.guild.members.fetch(u.discord_id);
+                        if (member) {
+                            await db.addTrackedUser(interaction.guildId, null, u.github_username);
+                            trackedUsers.push(u);
+                            addedNew = true;
+                        }
+                    } catch (err) {
+                        // User not in server or fetch blocked
+                    }
+                }));
+                if (addedNew) {
+                    leaderboardCache.delete(interaction.guildId); // force fresh image gen
+                }
+            }
             
             if (trackedUsers.length === 0) {
                 return interaction.editReply('❌ Nobody in this server is on the leaderboard yet! Run `/verify` to join.');
             }
 
-            // 2. Map to the expected format
+            // 3. Map to the expected format
             const serverUsers = trackedUsers.map(u => ({
                 github_username: u.github_username
             }));
