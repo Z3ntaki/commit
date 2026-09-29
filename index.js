@@ -15,7 +15,8 @@ app.get('/', (req, res) => {
 
 app.get('/auth/github/callback', async (req, res) => {
     const code = req.query.code;
-    const discordId = req.query.state; // We passed their Discord ID in the state parameter
+    const stateStr = req.query.state || '';
+    const [discordId, guildId] = stateStr.split('___');
 
     if (!code || !discordId) {
         return res.status(400).send('Invalid request: Missing code or state');
@@ -45,6 +46,11 @@ app.get('/auth/github/callback', async (req, res) => {
 
         // Save directly to the Database!
         await db.addVerifiedUser(discordId, githubUsername);
+        
+        // If they verified inside a server, add them to that server's leaderboard automatically
+        if (guildId && guildId !== 'undefined' && guildId !== 'null' && guildId !== 'dm') {
+            await db.addTrackedUser(guildId, null, githubUsername);
+        }
 
         res.send(`<div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
             <h1 style="color: #238636;">Verification Successful! 🎉</h1>
@@ -200,29 +206,21 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'leaderboard') {
         await interaction.deferReply();
         try {
-            // 1. Get all verified users globally
-            const allVerified = await db.getAllVerifiedUsers();
+            if (!interaction.guildId) {
+                return interaction.editReply('❌ This command can only be used in a server.');
+            }
+
+            // 1. Get tracked users for this specific server directly from the database
+            const trackedUsers = await db.getTrackedUsersByGuild(interaction.guildId);
             
-            if (allVerified.length === 0) {
-                return interaction.editReply('❌ Nobody has verified their GitHub account yet! Run `/verify` to link your account.');
+            if (trackedUsers.length === 0) {
+                return interaction.editReply('❌ Nobody in this server is on the leaderboard yet! Run `/verify` to join.');
             }
 
-            // 2. Filter to only users who are in this specific Discord server
-            let serverUsers = [];
-            await Promise.all(allVerified.map(async (u) => {
-                try {
-                    const member = await interaction.guild.members.fetch(u.discord_id);
-                    if (member) serverUsers.push(u); 
-                } catch (err) {
-                    // Ignore users not in server or if Discord blocks the fetch
-                }
+            // 2. Map to the expected format
+            const serverUsers = trackedUsers.map(u => ({
+                github_username: u.github_username
             }));
-
-            // Fallback: If Discord strict intents blocked our fetches, fallback to global list 
-            // so the leaderboard doesn't break.
-            if (serverUsers.length === 0) {
-                serverUsers = allVerified;
-            }
 
             if (!process.env.GITHUB_TOKEN) {
                 return interaction.editReply('❌ The bot owner needs to set GITHUB_TOKEN in the environment variables (using a GitHub Personal Access Token) to use the true leaderboard.');
@@ -283,7 +281,6 @@ client.on('interactionCreate', async interaction => {
                             }
 
                             leaderboardData.push({
-                                discord_id: user.discord_id,
                                 github_username: user.github_username,
                                 avatar_url: userData.avatarUrl,
                                 commits: calendar.totalContributions,
@@ -322,6 +319,17 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (interaction.commandName === 'verify') {
+        // First check if they are already verified globally
+        const verified = await db.getVerifiedUser(interaction.user.id);
+        if (verified && interaction.guildId) {
+            // Automatically add them to this server's leaderboard
+            await db.addTrackedUser(interaction.guildId, interaction.channelId, verified.github_username);
+            return interaction.reply({ 
+                content: `✅ You are already verified globally as **${verified.github_username}**!\nI have automatically added you to this server's leaderboard.`, 
+                ephemeral: true 
+            });
+        }
+
         const clientId = process.env.GITHUB_CLIENT_ID;
         
         if (!clientId) {
@@ -333,7 +341,9 @@ client.on('interactionCreate', async interaction => {
         
         const redirectUri = encodeURIComponent(`${hostUrl}/auth/github/callback`);
         
-        const oauthUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&state=${interaction.user.id}`;
+        // Pass both user ID and guild ID in the state so we know where to add them after OAuth
+        const guildId = interaction.guildId || 'dm';
+        const oauthUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&state=${interaction.user.id}___${guildId}`;
         
         const row = new ActionRowBuilder()
             .addComponents(
