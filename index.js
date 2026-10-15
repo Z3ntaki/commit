@@ -488,13 +488,23 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-const token = process.env.DISCORD_TOKEN;
-console.log(`[DEBUG] DISCORD_TOKEN present: ${!!token}, length: ${token ? token.length : 0}`);
+const token = (process.env.DISCORD_TOKEN || '').trim();
+console.log(`[DEBUG] DISCORD_TOKEN present: ${!!token}, length: ${token.length}`);
 
 if (token && token !== 'your_bot_token_here') {
-    client.login(token).catch(err => {
-        console.error('[ERROR] client.login() failed:', err.message);
-    });
+    // Timeout in case the WebSocket handshake hangs silently (e.g. revoked token)
+    const loginTimeout = setTimeout(() => {
+        console.error('[ERROR] client.login() timed out after 15s — token is likely revoked. Reset it at discord.com/developers');
+        process.exit(1);
+    }, 15000);
+
+    client.login(token)
+        .then(() => clearTimeout(loginTimeout))
+        .catch(err => {
+            clearTimeout(loginTimeout);
+            console.error('[ERROR] client.login() failed:', err.message);
+            process.exit(1);
+        });
 } else {
     console.log('[ERROR] Bot login skipped — DISCORD_TOKEN is missing or placeholder.');
 }
