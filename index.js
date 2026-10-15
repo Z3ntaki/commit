@@ -489,7 +489,7 @@ client.on('interactionCreate', async interaction => {
 });
 
 const token = (process.env.DISCORD_TOKEN || '').trim();
-console.log(`[DEBUG] DISCORD_TOKEN present: ${!!token}, length: ${token.length}`);
+console.log(`[DEBUG] DISCORD_TOKEN present: ${!!token}, length: ${token.length}, ends with: ...${token.slice(-10)}`);
 
 if (token && token !== 'your_bot_token_here') {
     // Timeout in case the WebSocket handshake hangs silently (e.g. revoked token)
