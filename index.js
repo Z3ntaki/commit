@@ -385,8 +385,6 @@ client.on('interactionCreate', async interaction => {
             console.error('Leaderboard error:', error);
             await interaction.editReply(`❌ An unexpected error occurred: ${error.message || error}`);
         }
-    }
-
     } else if (interaction.commandName === 'verify') {
         // First check if they are already verified globally
         const verified = await db.getVerifiedUser(interaction.user.id);
