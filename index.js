@@ -491,19 +491,26 @@ client.on('interactionCreate', async interaction => {
 const token = (process.env.DISCORD_TOKEN || '').trim();
 console.log(`[DEBUG] DISCORD_TOKEN present: ${!!token}, length: ${token.length}, ends with: ...${token.slice(-10)}`);
 
+// Log WebSocket events to debug connection issues
+client.on('shardReady', (id) => console.log(`[DEBUG] Shard ${id} ready`));
+client.on('shardError', (err) => console.error(`[DEBUG] Shard error:`, err.message));
+client.on('shardDisconnect', (event, id) => console.warn(`[DEBUG] Shard ${id} disconnected. Code: ${event.code}`));
+
 if (token && token !== 'your_bot_token_here') {
-    // Timeout in case the WebSocket handshake hangs silently (e.g. revoked token)
+    let loginDone = false;
     const loginTimeout = setTimeout(() => {
-        console.error('[ERROR] client.login() timed out after 15s — token is likely revoked. Reset it at discord.com/developers');
-        process.exit(1);
-    }, 15000);
+        if (!loginDone) {
+            console.error('[ERROR] client.login() timed out after 60s — Discord may be rate-limiting this IP. The bot will keep retrying automatically via discord.js reconnect logic.');
+        }
+    }, 60000);
 
     client.login(token)
-        .then(() => clearTimeout(loginTimeout))
+        .then(() => { loginDone = true; clearTimeout(loginTimeout); })
         .catch(err => {
+            loginDone = true;
             clearTimeout(loginTimeout);
             console.error('[ERROR] client.login() failed:', err.message);
-            process.exit(1);
+            // Do NOT exit — let the process stay alive so Render doesn't crash-loop
         });
 } else {
     console.log('[ERROR] Bot login skipped — DISCORD_TOKEN is missing or placeholder.');
