@@ -155,9 +155,8 @@ client.on('interactionCreate', async interaction => {
 
     if (interaction.commandName === 'ping') {
         await interaction.reply('Pong! 🏓 The bot is online.');
-    }
+    } else if (interaction.commandName === 'graph' || interaction.commandName === 'track') {
 
-    if (interaction.commandName === 'graph' || interaction.commandName === 'track') {
         await interaction.deferReply();
         const username = interaction.options.getString('username');
         
@@ -203,11 +202,7 @@ client.on('interactionCreate', async interaction => {
             console.error(err);
             await interaction.editReply(`❌ Could not generate graph for **${username}**. Make sure the username is correct or try again later.`);
         }
-    }
-
-
-
-    if (interaction.commandName === 'leaderboard') {
+    } else if (interaction.commandName === 'leaderboard') {
         await interaction.deferReply();
         try {
             const type = interaction.options.getString('type') || 'server';
@@ -392,7 +387,7 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    if (interaction.commandName === 'verify') {
+    } else if (interaction.commandName === 'verify') {
         // First check if they are already verified globally
         const verified = await db.getVerifiedUser(interaction.user.id);
         if (verified && interaction.guildId) {
@@ -433,9 +428,7 @@ client.on('interactionCreate', async interaction => {
             components: [row],
             ephemeral: true 
         });
-    }
-
-    if (interaction.commandName === 'me') {
+    } else if (interaction.commandName === 'me') {
         await interaction.deferReply();
         const verified = await db.getVerifiedUser(interaction.user.id);
         
