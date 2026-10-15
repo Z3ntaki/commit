@@ -488,8 +488,13 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-if (process.env.DISCORD_TOKEN && process.env.DISCORD_TOKEN !== 'your_bot_token_here') {
-    client.login(process.env.DISCORD_TOKEN);
+const token = process.env.DISCORD_TOKEN;
+console.log(`[DEBUG] DISCORD_TOKEN present: ${!!token}, length: ${token ? token.length : 0}`);
+
+if (token && token !== 'your_bot_token_here') {
+    client.login(token).catch(err => {
+        console.error('[ERROR] client.login() failed:', err.message);
+    });
 } else {
-    console.log('Bot login skipped because no valid token was found.');
+    console.log('[ERROR] Bot login skipped — DISCORD_TOKEN is missing or placeholder.');
 }
