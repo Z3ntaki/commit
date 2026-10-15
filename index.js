@@ -150,6 +150,14 @@ client.on('ready', () => {
     console.log(`Bot is ready!`);
 });
 
+// Prevent unhandled DiscordAPIErrors (e.g. expired interaction tokens) from crashing the process
+client.on('error', (err) => {
+    console.error('Discord client error (non-fatal):', err.message);
+});
+process.on('unhandledRejection', (err) => {
+    console.error('Unhandled promise rejection (non-fatal):', err?.message || err);
+});
+
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
@@ -386,22 +394,23 @@ client.on('interactionCreate', async interaction => {
             await interaction.editReply(`❌ An unexpected error occurred: ${error.message || error}`);
         }
     } else if (interaction.commandName === 'verify') {
-        // First check if they are already verified globally
+        // Defer immediately so Discord knows we received the interaction
+        await interaction.deferReply({ ephemeral: true });
+
+        const clientId = process.env.GITHUB_CLIENT_ID;
+        if (!clientId) {
+            return interaction.editReply({ content: '❌ The bot owner has not set up the GITHUB_CLIENT_ID yet!' });
+        }
+
+        // Check if they are already verified globally
         const verified = await db.getVerifiedUser(interaction.user.id);
         if (verified && interaction.guildId) {
             // Automatically add them to this server's leaderboard
             await db.addTrackedUser(interaction.guildId, interaction.channelId, verified.github_username);
             leaderboardCache.delete(interaction.guildId); // clear cache
-            return interaction.reply({ 
-                content: `✅ You are already verified globally as **${verified.github_username}**!\nI have automatically added you to this server's leaderboard.`, 
-                ephemeral: true 
+            return interaction.editReply({ 
+                content: `✅ You are already verified globally as **${verified.github_username}**!\nI have automatically added you to this server's leaderboard.`
             });
-        }
-
-        const clientId = process.env.GITHUB_CLIENT_ID;
-        
-        if (!clientId) {
-            return interaction.reply({ content: '❌ The bot owner has not set up the GITHUB_CLIENT_ID yet!', ephemeral: true });
         }
 
         let hostUrl = process.env.HOST_URL || `http://localhost:${port}`;
@@ -421,10 +430,9 @@ client.on('interactionCreate', async interaction => {
                     .setStyle(ButtonStyle.Link)
             );
         
-        await interaction.reply({
+        await interaction.editReply({
             content: `🔒 **Verify your GitHub Account**\n\nClick the button below to securely log in with GitHub. This will permanently link your Discord account to your GitHub profile!`,
-            components: [row],
-            ephemeral: true 
+            components: [row]
         });
     } else if (interaction.commandName === 'me') {
         await interaction.deferReply();
